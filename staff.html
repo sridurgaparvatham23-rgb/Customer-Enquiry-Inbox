@@ -1,1 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Staff Dashboard - Enquiries</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f6f8; padding: 20px; }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 14px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .pill { padding: 4px 10px; border-radius: 999px; background:#eee; font-size: 12px; }
+    .muted { color:#666; font-size: 12px; }
+    input, select, textarea, button { padding: 8px; }
+    textarea { width: 100%; min-height: 70px; }
+    button { cursor:pointer; border:0; border-radius: 6px; background:#1976d2; color:#fff; padding: 10px 12px; }
+    button.secondary { background:#555; }
+    .loginBox { max-width: 420px; margin: 40px auto; background:#fff; padding: 18px; border-radius: 8px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; margin: 10px 0 20px; }
+    .danger { color:#b00020; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <!-- MARKER ACCESS NOTE (Required in brief) -->
+    <div class="card">
+      <b>Staff Login (for markers)</b>
+      <div class="muted">Username: <b>staff</b> | Password: <b>nci123</b></div>
+      <div class="muted">Note: This is a simple in-page login gate (not Firebase Auth).</div>
+    </div>
+
+    <!-- Login -->
+    <div id="login" class="loginBox">
+      <h2>Staff Login</h2>
+      <div class="grid2">
+        <input id="u" placeholder="Username" />
+        <input id="p" placeholder="Password" type="password" />
+      </div>
+      <div style="margin-top:10px;">
+        <button onclick="doLogin()">Login</button>
+      </div>
+      <div id="loginMsg" class="muted" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- App -->
+    <div id="app" style="display:none;">
+      <div class="topbar">
+        <div>
+          <h2 style="margin:0;">Staff Dashboard</h2>
+          <div class="muted">Real-time view of enquiries (updates without refresh).</div>
+        </div>
+        <button class="secondary" onclick="logout()">Logout</button>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="pill">Live</div>
+          <div class="muted" id="stats">Loading…</div>
+        </div>
+      </div>
+
+      <div id="list"></div>
+    </div>
+
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+    import {
+      getFirestore,
+      collection,
+      query,
+      orderBy,
+      onSnapshot,
+      doc,
+      updateDoc,
+      serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+
+    // Same config as public.html
+    const firebaseConfig = {
+      apiKey: "AIzaSyABlliFUQG4llsooDqOODG0A7IU3IQH9AY",
+      authDomain: "dbc-enquiry-box.firebaseapp.com",
+      projectId: "dbc-enquiry-box",
+      storageBucket: "dbc-enquiry-box.firebasestorage.app",
+      messagingSenderId: "118925717032",
+      appId: "1:118925717032:web:0394f5288318d6598d0f1d"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Simple in-page login gate
+    window.doLogin = function () {
+      const u = document.getElementById("u").value.trim();
+      const p = document.getElementById("p").value.trim();
+      const msg = document.getElementById("loginMsg");
+
+      if (u === "staff" && p === "nci123") {
+        sessionStorage.setItem("staffAuthed", "true");
+        document.getElementById("login").style.display = "none";
+        document.getElementById("app").style.display = "block";
+        msg.textContent = "";
+        startRealtime();
+      } else {
+        msg.innerHTML = `<span class="danger">Invalid credentials.</span> Try Username: staff, Password: nci123`;
+      }
+    };
+
+    window.logout = function () {
+      sessionStorage.removeItem("staffAuthed");
+      location.reload();
+    };
+
+    // Auto-login if already authed
+    if (sessionStorage.getItem("staffAuthed") === "true") {
+      document.getElementById("login").style.display = "none";
+      document.getElementById("app").style.display = "block";
+      startRealtime();
+    }
+
+    function esc(s) {
+      return String(s ?? "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function startRealtime() {
+      const list = document.getElementById("list");
+      const stats = document.getElementById("stats");
+
+      // Real-time listener
+      const q = query(collection(db, "enquiries"), orderBy("createdAt", "desc"));
+
+      onSnapshot(q, (snap) => {
+        stats.textContent = `${snap.size} total enquiries (real-time).`;
+
+        if (snap.empty) {
+          list.innerHTML = `<div class="card">No enquiries yet.</div>`;
+          return;
+        }
+
+        const cards = [];
+        snap.forEach((d) => {
+          const e = d.data();
+          const id = d.id;
+
+          const created = e.createdAt?.toDate ? e.createdAt.toDate().toLocaleString() : "—";
+          const updated = e.updatedAt?.toDate ? e.updatedAt.toDate().toLocaleString() : "—";
+
+          cards.push(`
+            <div class="card">
+              <div class="row" style="justify-content:space-between;">
+                <div>
+                  <b>${esc(e.name)}</b> <span class="muted">(${esc(e.email)})</span><br/>
+                  <span class="muted">Created: ${esc(created)} | Updated: ${esc(updated)}</span>
+                </div>
+                <div class="pill">Status: <b>${esc(e.status)}</b></div>
+              </div>
+
+              <div style="margin-top:10px;">
+                <div><b>Message</b></div>
+                <div>${esc(e.message)}</div>
+              </div>
+
+              <div style="margin-top:12px;">
+                <div class="row">
+                  <label class="muted">Update status:</label>
+                  <select id="status_${id}">
+                    ${["New","In Progress","Resolved"].map(s => `<option ${e.status===s?"selected":""}>${s}</option>`).join("")}
+                  </select>
+
+                  <button onclick="saveStatus('${id}')">Save</button>
+                </div>
+              </div>
+
+              <div style="margin-top:12px;">
+                <div class="muted">Internal notes (staff-only)</div>
+                <textarea id="notes_${id}" placeholder="Add notes for staff...">${esc(e.internalNotes)}</textarea>
+                <div style="margin-top:8px;">
+                  <button onclick="saveNotes('${id}')">Save Notes</button>
+                </div>
+              </div>
+            </div>
+          `);
+        });
+
+        list.innerHTML = cards.join("");
+      });
+    }
+
+    window.saveStatus = async function (id) {
+      const newStatus = document.getElementById(`status_${id}`).value;
+      await updateDoc(doc(db, "enquiries", id), {
+        status: newStatus,
+        updatedAt: serverTimestamp()
+      });
+    };
+
+    window.saveNotes = async function (id) {
+      const notes = document.getElementById(`notes_${id}`).value;
+      await updateDoc(doc(db, "enquiries", id), {
+        internalNotes: notes,
+        updatedAt: serverTimestamp()
+      });
+    };
+  </script>
+</body>
+</html>
 
