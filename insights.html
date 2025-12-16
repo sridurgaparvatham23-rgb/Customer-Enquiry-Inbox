@@ -1,1 +1,172 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Insights - Customer Enquiry Inbox</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f6f8; padding: 20px; }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    .card { background:#fff; border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+    .kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; }
+    .kpi { background:#fff; border-radius: 10px; padding: 14px; }
+    .kpi .label { color:#666; font-size: 12px; }
+    .kpi .value { font-size: 28px; font-weight: bold; margin-top: 6px; }
+    .muted { color:#666; font-size: 12px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { text-align:left; padding: 10px; border-bottom: 1px solid #eee; }
+    .pill { padding: 4px 10px; border-radius: 999px; background:#eee; font-size: 12px; display:inline-block; }
+    @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h2 style="margin:0;">Insights</h2>
+      <div class="muted">Operational view derived from Firestore (updates without refresh).</div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Total enquiries</div>
+        <div class="value" id="k_total">0</div>
+      </div>
+      <div class="kpi">
+        <div class="label">New</div>
+        <div class="value" id="k_new">0</div>
+      </div>
+      <div class="kpi">
+        <div class="label">In Progress</div>
+        <div class="value" id="k_progress">0</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Resolved</div>
+        <div class="value" id="k_resolved">0</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="muted" style="margin-bottom:10px;">
+        Last 24 hours activity + resolution rate (live).
+      </div>
+      <div class="kpis" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="kpi">
+          <div class="label">Created in last 24h</div>
+          <div class="value" id="k_24h">0</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Resolution rate</div>
+          <div class="value" id="k_rate">0%</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Live update</div>
+          <div class="value" style="font-size:16px;" id="k_live">Listening…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Recent enquiries</h3>
+      <div class="muted" style="margin-bottom:10px;">Top 10 most recent records.</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Created</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="recent"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+    import {
+      getFirestore,
+      collection,
+      query,
+      orderBy,
+      onSnapshot
+    } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyABlliFUQG4llsooDqOODG0A7IU3IQH9AY",
+      authDomain: "dbc-enquiry-box.firebaseapp.com",
+      projectId: "dbc-enquiry-box",
+      storageBucket: "dbc-enquiry-box.firebasestorage.app",
+      messagingSenderId: "118925717032",
+      appId: "1:118925717032:web:0394f5288318d6598d0f1d"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const el = (id) => document.getElementById(id);
+
+    function esc(s) {
+      return String(s ?? "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    const qAll = query(collection(db, "enquiries"), orderBy("createdAt", "desc"));
+
+    onSnapshot(qAll, (snap) => {
+      const total = snap.size;
+      let cNew = 0, cProg = 0, cRes = 0, c24 = 0;
+
+      const now = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+
+      const recentRows = [];
+      let added = 0;
+
+      snap.forEach((d) => {
+        const e = d.data();
+
+        // Status counts
+        if (e.status === "New") cNew++;
+        else if (e.status === "In Progress") cProg++;
+        else if (e.status === "Resolved") cRes++;
+
+        // Last 24h count
+        if (e.createdAt?.toDate) {
+          const t = e.createdAt.toDate().getTime();
+          if ((now - t) <= dayMs) c24++;
+        }
+
+        // Recent table (top 10)
+        if (added < 10) {
+          const created = e.createdAt?.toDate ? e.createdAt.toDate().toLocaleString() : "—";
+          recentRows.push(`
+            <tr>
+              <td>${esc(created)}</td>
+              <td>${esc(e.name)}</td>
+              <td>${esc(e.email)}</td>
+              <td><span class="pill">${esc(e.status)}</span></td>
+            </tr>
+          `);
+          added++;
+        }
+      });
+
+      const rate = total === 0 ? 0 : Math.round((cRes / total) * 100);
+
+      el("k_total").textContent = total;
+      el("k_new").textContent = cNew;
+      el("k_progress").textContent = cProg;
+      el("k_resolved").textContent = cRes;
+      el("k_24h").textContent = c24;
+      el("k_rate").textContent = `${rate}%`;
+      el("k_live").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+      el("recent").innerHTML = recentRows.join("") || `<tr><td colspan="4" class="muted">No data yet.</td></tr>`;
+    });
+  </script>
+</body>
+</html>
